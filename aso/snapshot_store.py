@@ -3,7 +3,7 @@
 Supabase-backed (hosted Postgres) so the GitHub Action and the local backend
 share one store — the data accumulates daily regardless of any one machine.
 Schema: supabase/migrations/004_movement_tracking.sql. The snapshot HISTORY is
-the moat — it accrues forward and can't be backfilled.
+append-only — it accrues forward and can't be backfilled.
 """
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional

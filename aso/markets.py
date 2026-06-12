@@ -1,4 +1,4 @@
-"""Shared market constants for GapScout v2.
+"""Shared market constants.
 
 Popularity uses ISO storefront codes (UPPERCASE) for the Apple Ads endpoint.
 iTunes Search API uses lowercase country codes. Keep both mappings here so
