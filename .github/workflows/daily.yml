@@ -1,0 +1,49 @@
+# Daily rank snapshots — one matrix job per market, ~35 min each.
+# Secrets (repo Settings → Secrets and variables → Actions):
+#   SUPABASE_URL, SUPABASE_SERVICE_KEY
+name: Daily rank snapshots
+
+on:
+  schedule:
+    - cron: "0 5 * * *"   # 05:00 UTC daily
+  workflow_dispatch:
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        market: [US, GB, CA, AU, DE, FR]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      # prune runs in the US job only (idempotent, but no need to race 6×)
+      - run: python runner.py --storefront ${{ matrix.market }} ${{ matrix.market == 'US' && '--prune' || '' }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+
+  # GitHub disables scheduled workflows on repos with no activity for 60 days.
+  # A tiny monthly commit keeps the schedule alive.
+  keepalive:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          if [ "$(date -u +%d)" = "01" ]; then
+            date -u > .keepalive
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add .keepalive
+            git commit -m "keepalive" && git push || true
+          else
+            echo "not the 1st — skipping keepalive"
+          fi
