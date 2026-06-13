@@ -5,7 +5,11 @@ name: Daily rank snapshots
 
 on:
   schedule:
-    - cron: "0 5 * * *"   # 05:00 UTC daily
+    # GitHub scheduled runs are best-effort (often delayed, sometimes dropped).
+    # Two times/day: the afternoon run is a backup — it skips pairs already done
+    # today, so it's near-free if the morning run succeeded and fills the gap if not.
+    - cron: "0 5 * * *"    # 05:00 UTC
+    - cron: "0 14 * * *"   # 14:00 UTC (backup)
   workflow_dispatch:
 
 jobs:
