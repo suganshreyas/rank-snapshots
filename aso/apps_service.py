@@ -59,13 +59,17 @@ async def get_keyword_top10(
             out.append(_app_view(i, merged))
 
         # Fallback: scrape the App Store page for apps iTunes returned 0 shots for
-        # (and to fill missing subtitles). Only for the gaps — keeps it fast.
+        # (and to fill missing subtitles — iTunes never returns subtitle). Only for
+        # the gaps. Bound concurrency: firing all 10 page fetches at once triggers
+        # Apple 403s under the heavy daily run, which left subtitles empty.
         gaps = [a for a in out
                 if not a["screenshots"] or not a["ipad_screenshots"] or not a["subtitle"]]
         if gaps:
-            scraped = await asyncio.gather(
-                *[scrape_app_page(a["url"], client) for a in gaps]
-            )
+            sem = asyncio.Semaphore(3)
+            async def _scrape(a):
+                async with sem:
+                    return await scrape_app_page(a["url"], client)
+            scraped = await asyncio.gather(*[_scrape(a) for a in gaps])
             for a, s in zip(gaps, scraped):
                 if not a["screenshots"] and s.get("screenshots"):
                     a["screenshots"] = s["screenshots"]

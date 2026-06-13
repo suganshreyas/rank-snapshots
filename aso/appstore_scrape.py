@@ -7,6 +7,7 @@ in the page's `serialized-server-data` JSON. This is the fallback source.
 FRAGILE: depends on Apple's page structure (script id + shelfMapping path).
 Monitor — if it returns nothing for a known-good app, Apple changed the page.
 """
+import asyncio
 import html as _html
 import json
 import re
@@ -39,8 +40,25 @@ async def scrape_app_page(
     should_close = client is None
     client = client or httpx.AsyncClient(timeout=20, follow_redirects=True)
     try:
-        r = await client.get(track_view_url, headers={"User-Agent": _UA})
-        if r.status_code != 200:
+        # Retry transient failures — under the heavy daily run, Apple rate-limits
+        # (403/429) and times out; a silent {} here means a permanently empty
+        # subtitle/screenshots for that app's snapshot. Back off and retry.
+        r = None
+        for attempt in range(3):
+            try:
+                r = await client.get(track_view_url, headers={"User-Agent": _UA})
+                if r.status_code == 200:
+                    break
+                if r.status_code in (403, 429, 503) and attempt < 2:
+                    await asyncio.sleep(1.5 * (attempt + 1))
+                    continue
+                return {}
+            except httpx.RequestError:
+                if attempt < 2:
+                    await asyncio.sleep(1.5 * (attempt + 1))
+                    continue
+                return {}
+        if r is None or r.status_code != 200:
             return {}
         sub_m = _SUBTITLE_RE.search(r.text)
         subtitle = _html.unescape(sub_m.group(1).strip()) if sub_m else ""
