@@ -1,0 +1,36 @@
+# Keep the Render free-tier API awake during active hours so the dashboard
+# doesn't pay a 30-50s cold start on the first request after idle.
+#
+# Why public repo: GitHub Actions minutes are unlimited on public repos
+# (private would bill per-minute, rounded up → way over the 2,000 free).
+#
+# Why active-hours-only (not 24/7): a Render free web service has a 750
+# instance-hours/month cap. Keeping it warm 16h/day ≈ 480h/month (safe);
+# 24/7 ≈ 730h would eat the whole budget. The instance sleeps overnight,
+# so only the day's first request pays a cold start.
+#
+# Adjust the hours below to YOUR timezone. Times are UTC. Current window
+# 13:00–04:59 UTC covers US daytime/evening + EU/IN evening.
+name: Keep backend warm
+
+on:
+  schedule:
+    - cron: "*/10 13-23,0-4 * * *"   # every 10 min, ~13:00–05:00 UTC
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Ping /health (warms the instance; -m 70 waits out a cold start)
+        run: |
+          for i in 1 2 3; do
+            code=$(curl -s -o /dev/null -m 70 -w "%{http_code}" \
+              https://perch-api-d263.onrender.com/health) || code=000
+            echo "attempt $i: HTTP $code"
+            [ "$code" = "200" ] && exit 0
+            sleep 10
+          done
+          # don't fail the job on a transient miss — the next cron retries
+          echo "no 200 this run (instance may be mid-cold-start); will retry"
