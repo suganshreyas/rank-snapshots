@@ -13,8 +13,18 @@ import httpx
 from aso.apps_service import get_keyword_top10
 from utils.db import get_client
 
-# Metadata fields we diff for "what changed". screenshots compared as a set.
+import re
+
+# Metadata fields we diff for "what changed".
 _META_FIELDS = ["name", "subtitle", "icon_url", "version", "price", "release_notes"]
+_SS_HASH = re.compile(r"/v4/(.+?)/\d+x\d+")
+
+
+def _ss_key(url: str) -> str:
+    """Content identity of an App Store image URL, ignoring the CDN shard + size
+    suffix (Apple re-hosts the same image at a new shard/size URL on version bumps)."""
+    m = _SS_HASH.search(url or "")
+    return m.group(1) if m else (url or "")
 
 
 def _today() -> str:
@@ -182,14 +192,23 @@ def detect_changes(keyword: str, storefront: str, date: str = None) -> List[Dict
             add(adam, "rank_move", old, pos, f"#{old}", f"#{pos}", name)
         prev_app = _app(db, adam, storefront, prev)
         if app and prev_app:
+            # Only flag a change when BOTH sides are present and actually differ.
+            # An empty side = that day's scrape MISSED the field (a capture miss),
+            # NOT a real change — logging those flooded app_changes with false
+            # "changed" noise (~98% of subtitle, ~47% of screenshot "changes").
             for f in _META_FIELDS:
-                if (app.get(f) or "") != (prev_app.get(f) or ""):
+                nv = (app.get(f) or "").strip()
+                ov = (prev_app.get(f) or "").strip()
+                if nv and ov and nv != ov:
                     add(adam, f, None, None, str(prev_app.get(f))[:200],
                         str(app.get(f))[:200], name)
-            if set(app.get("screenshots", [])) != set(prev_app.get("screenshots", [])):
+            # screenshots: compare by content-hash so a CDN re-host (same image, new
+            # URL) doesn't count; require both non-empty so a scrape miss doesn't either.
+            new_ss = app.get("screenshots") or []
+            old_ss = prev_app.get("screenshots") or []
+            if new_ss and old_ss and {_ss_key(u) for u in new_ss} != {_ss_key(u) for u in old_ss}:
                 add(adam, "screenshots", None, None,
-                    f"{len(prev_app.get('screenshots', []))} shots",
-                    f"{len(app.get('screenshots', []))} shots", name)
+                    f"{len(old_ss)} shots", f"{len(new_ss)} shots", name)
     for adam, old in prev_ranks.items():
         if adam not in today_ranks:
             pa = _app(db, adam, storefront, prev) or {}
